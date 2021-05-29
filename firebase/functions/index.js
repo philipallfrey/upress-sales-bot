@@ -50,6 +50,7 @@ exports.tweetNewSales = functions
           .filter((tweet) => regex.test(tweet.text))
           .map((tweet) => {
             return {
+              handle: tweet.user.screen_name,
               id: tweet.id_str, // Must be string format for use in retweet
               text: tweet.text,
               user: tweet.user.name,
@@ -59,7 +60,7 @@ exports.tweetNewSales = functions
 
       // Retweet tweets about sales/discounts
       for(t of tweets) {
-        T.post('statuses/retweet/:id', {id: t.id}, (err, data, response) => {
+        T.post('statuses/update', {status:`From ${t.user}:`, attachment_url:`https://twitter.com/${t.handle}/status/${t.id}`}, (err, data, response) => {
           if (err) {
             console.error(JSON.stringify(err))
           }
