@@ -1,6 +1,7 @@
 const admin = require("firebase-admin");
 const functions = require("firebase-functions");
 const Twit = require('twit');
+const masto = require('masto');
 
 admin.initializeApp(functions.config().firebase);
 
@@ -45,7 +46,7 @@ exports.tweetNewSales = functions
           .set({since: +latestId}); // Force numeric format, just in case
 
       // Filter to find tweets which mention a sale/discount
-      const regex = /\bsale\b|\bcode\b|\bcoupon\b|\bdiscount(s?)\b|\bdescuento(s?)\b|%/i;
+      const regex = /\bsale\b|\bcode\b|\bcoupon\b|\bgiveaway\b|\bdiscount(s?)\b|\bdescuento(s?)\b|%/i;
       const tweets = results.data
           .filter((tweet) => regex.test(tweet.text))
           .map((tweet) => {
@@ -66,4 +67,53 @@ exports.tweetNewSales = functions
           }
         });
       }
+    });
+
+exports.boostNewSales = functions
+    .runWith({
+      timeoutSeconds: 540, // max timeout
+      memory: "2GB", // more ram
+    })
+    .pubsub.schedule("every 24 hours")
+    .onRun( async () => {
+
+        const parameters = functions.config().mastodon;
+
+        const client = await masto.login({
+         url: parameters.url,
+         accessToken: parameters.access_token
+        });
+
+        const regex = /\bsale\b|\bcode\b|\bcoupon\b|\bdiscount(s?)\b|\bgiveaway\b|\bdescuento(s?)\b|%/i;
+
+        const data = await admin
+            .firestore()
+            .collection("tootId")
+            .doc("latest")
+            .get();
+
+        const minId = data.get("minId");
+
+        // TODO: Current toot volume is low, so this is fine. If it gets above 40 toots/hour then revisit pagination
+        const statuses = await client.v1.timelines.listHome({
+          limit: 40,
+          minId: minId
+        });
+
+        // Boost any toots with sales/discounts
+        for (const status of statuses) {
+          const cleanedContent = status.content.replace(/(<([^>]+)>)/gi, "");
+          if(regex.test(cleanedContent)) {
+            await client.v1.statuses.reblog(status.id);
+          }
+        }
+
+        // Save ID of latest toot for next call
+        const latestId = statuses[0].id;
+        admin
+            .firestore()
+            .collection("tootId")
+            .doc("latest")
+            .set({minId: latestId});
+
     });
